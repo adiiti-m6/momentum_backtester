@@ -43,6 +43,6 @@ env/
 Thumbs.db
 
 # Project specific
-*.csv
+# *.csv
 !sample_data*.csv
 .cache/
