@@ -144,6 +144,9 @@ class BacktestEngine:
         
         rebalance_days = rebalance_days.sort_values()
         
+        # Minimum equity threshold to prevent division errors
+        MIN_EQUITY = 1.0
+        
         # Initialize tracking structures
         equity_curve = []
         dates_list = []
@@ -237,10 +240,15 @@ class BacktestEngine:
             # Start with whatever cash we have left after trades
             portfolio_equity = current_equity + current_value
             
+            # Check for critically low equity
+            if portfolio_equity < MIN_EQUITY and date_idx > 0:
+                logger.error(f"Portfolio equity dropped to ${portfolio_equity:.2f} on {date}; stopping")
+                portfolio_equity = 0.0  # Mark as failed
+            
             # Compute daily return (only if we have positions or previous equity)
             if date_idx > 0:
                 prev_equity = equity_curve[-1]
-                daily_return = (portfolio_equity - prev_equity) / prev_equity if prev_equity > 0 else 0.0
+                daily_return = (portfolio_equity - prev_equity) / prev_equity if prev_equity > MIN_EQUITY else 0.0
             else:
                 daily_return = 0.0
             

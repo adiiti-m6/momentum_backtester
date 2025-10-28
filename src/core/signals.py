@@ -29,12 +29,22 @@ def quarterly_total_return(prices: DataFrame, lookback_quarters: int = 1) -> Dat
     if lookback_quarters <= 0:
         raise ValueError("lookback_quarters must be > 0")
     
+    # Validate prices are non-negative
+    if (prices < 0).any().any():
+        logger.warning("Found negative prices in data; will cause invalid returns")
+    if (prices == 0).any().any():
+        logger.warning("Found zero prices in data; will cause NaN returns")
+    
     # For each row, get the price from lookback_quarters ago
     # Assuming quarterly frequency, lookback_quarters = 1 means shift by 1
     shifted_prices = prices.shift(lookback_quarters)
     
     # Compute total return: (price_t - price_t_lag) / price_t_lag
     returns = (prices - shifted_prices) / shifted_prices
+    
+    # Check if all returns are NaN
+    if returns.isna().all().all():
+        logger.error("All returns are NaN; insufficient data or data quality issue")
     
     logger.info(f"Computed quarterly returns with lookback={lookback_quarters}")
     return returns

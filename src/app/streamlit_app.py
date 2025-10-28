@@ -301,10 +301,11 @@ def run_backtest(df_long, config, initial_capital):
         if len(qe_days) < 1:
             raise ValueError("Insufficient data for at least 1 quarter-end rebalance")
         
-        # Simple strategy: equal weight all available tickers
+        # Momentum strategy with ranking
         def strategy_callable(date, current_positions, current_equity):
-            """Simple equal-weight strategy."""
+            """Momentum-based strategy: rank by returns and select top performers."""
             from src.core.strategy import Decisions
+            from src.core.signals import quarterly_total_return, rank_by_momentum, top_n_and_threshold
             
             try:
                 # Get available prices on this date
@@ -321,30 +322,70 @@ def run_backtest(df_long, config, initial_capital):
                 available_prices = prices.loc[date]
                 universe = set(available_prices.index[available_prices.notna()])
                 
-                if len(universe) == 0:
+                if len(universe) < config.entry_count:
+                    st.warning(f"⚠️ Not enough tickers ({len(universe)}) to meet entry_count ({config.entry_count})")
                     return Decisions(
                         date=date,
-                        universe=set(),
+                        universe=universe,
                         buys=set(),
                         sells=set(),
                         target_weights={},
                         cohort_ages={}
                     )
                 
-                # Simple equal weight
-                weight = 1.0 / len(universe)
-                target_weights = {ticker: weight for ticker in universe}
+                # Get lookback period start date
+                lookback_start = date - pd.DateOffset(months=config.lookback_months)
+                
+                # Get historical prices for momentum calculation
+                mask = (prices.index >= lookback_start) & (prices.index <= date)
+                lookback_prices = prices.loc[mask]
+                
+                if len(lookback_prices) < 2:
+                    return Decisions(
+                        date=date,
+                        universe=universe,
+                        buys=set(),
+                        sells=set(),
+                        target_weights={},
+                        cohort_ages={}
+                    )
+                
+                # Calculate momentum (total return over lookback period)
+                momentum_returns = quarterly_total_return(lookback_prices)
+                
+                # Rank by momentum
+                ranks = rank_by_momentum(momentum_returns)
+                
+                # Select top performers for entry
+                entry_bool, threshold_bool = top_n_and_threshold(
+                    ranks,
+                    n=config.entry_count,
+                    threshold=config.exit_rank_threshold
+                )
+                
+                # Get tickers to buy (top entry_count)
+                entry_tickers = set(entry_bool.columns[entry_bool.iloc[0]].tolist()) if len(entry_bool) > 0 else set()
+                entry_tickers = entry_tickers.intersection(universe)  # Ensure available
+                
+                # Equal weight on selected tickers
+                if len(entry_tickers) > 0:
+                    weight = 1.0 / len(entry_tickers)
+                    target_weights = {ticker: weight for ticker in entry_tickers}
+                else:
+                    target_weights = {}
                 
                 return Decisions(
                     date=date,
                     universe=universe,
-                    buys=set(),
+                    buys=entry_tickers,
                     sells=set(),
                     target_weights=target_weights,
-                    cohort_ages={ticker: 0 for ticker in universe}
+                    cohort_ages={ticker: 0 for ticker in entry_tickers}
                 )
             except Exception as e:
                 st.error(f"Strategy error on {date}: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
                 return Decisions(
                     date=date,
                     universe=set(),

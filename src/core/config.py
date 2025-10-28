@@ -21,7 +21,9 @@ class Config(BaseModel):
     @field_validator("entry_count")
     @classmethod
     def validate_entry_count(cls, v: int, info) -> int:
-        """Ensure entry_count <= universe_size."""
+        """Ensure entry_count > 0 and <= universe_size."""
+        if v <= 0:
+            raise ValueError("entry_count must be > 0")
         if "universe_size" in info.data:
             if v > info.data["universe_size"]:
                 raise ValueError(
@@ -33,11 +35,29 @@ class Config(BaseModel):
     @classmethod
     def validate_exit_rank_threshold(cls, v: int, info) -> int:
         """Ensure exit_rank_threshold >= entry_count."""
+        if v <= 0:
+            raise ValueError("exit_rank_threshold must be > 0")
         if "entry_count" in info.data:
             if v < info.data["entry_count"]:
                 raise ValueError(
                     f"exit_rank_threshold ({v}) must be >= entry_count ({info.data['entry_count']})"
                 )
+        return v
+    
+    @field_validator("transaction_cost_bps", "slippage_bps")
+    @classmethod
+    def validate_non_negative_costs(cls, v: float) -> float:
+        """Ensure transaction costs are non-negative."""
+        if v < 0:
+            raise ValueError("Transaction costs and slippage must be >= 0")
+        return v
+    
+    @field_validator("lookback_months", "holding_quarters", "min_history_days")
+    @classmethod
+    def validate_positive_periods(cls, v: int) -> int:
+        """Ensure periods are positive."""
+        if v <= 0:
+            raise ValueError("Periods must be > 0")
         return v
     
     def summary(self) -> Dict[str, Any]:
