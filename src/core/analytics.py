@@ -133,9 +133,14 @@ def calculate_quarterly_hit_ratio(returns: Series) -> float:
     if not isinstance(returns.index, pd.DatetimeIndex):
         raise ValueError("Returns index must be DatetimeIndex for quarterly resampling")
     
-    quarterly_returns = (1 + returns).resample('QE').prod() - 1
+    # Handle NaN values: replace with 0 (no return on that day)
+    returns_filled = returns.fillna(0.0)
+    
+    # Compute quarterly returns
+    quarterly_returns = (1 + returns_filled).resample('QE').prod() - 1
     
     if len(quarterly_returns) == 0:
+        logger.warning("No quarterly data found after resampling")
         return 0.0
     
     # Count positive quarters
@@ -143,6 +148,8 @@ def calculate_quarterly_hit_ratio(returns: Series) -> float:
     n_total = len(quarterly_returns)
     
     hit_ratio = n_positive / n_total if n_total > 0 else 0.0
+    
+    logger.info(f"Hit ratio: {n_positive} positive quarters out of {n_total} = {hit_ratio:.1%}")
     
     return hit_ratio
 
@@ -252,8 +259,11 @@ def create_quarterly_performance_table(returns: Series) -> DataFrame:
     if not isinstance(returns.index, pd.DatetimeIndex):
         raise ValueError("Returns index must be DatetimeIndex")
     
+    # Handle NaN values: replace with 0
+    returns_filled = returns.fillna(0.0)
+    
     # Resample to quarterly
-    quarterly_returns = (1 + returns).resample('QE').prod() - 1
+    quarterly_returns = (1 + returns_filled).resample('QE').prod() - 1
     
     # Compute cumulative return from start
     cumulative = (1 + quarterly_returns).cumprod() - 1

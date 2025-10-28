@@ -305,7 +305,6 @@ def run_backtest(df_long, config, initial_capital):
         def strategy_callable(date, current_positions, current_equity):
             """Momentum-based strategy: rank by returns and select top performers."""
             from src.core.strategy import Decisions
-            from src.core.signals import quarterly_total_return, rank_by_momentum, top_n_and_threshold
             
             try:
                 # Get available prices on this date
@@ -333,7 +332,7 @@ def run_backtest(df_long, config, initial_capital):
                         cohort_ages={}
                     )
                 
-                # Get lookback period start date
+                # Get lookback period start date (in months)
                 lookback_start = date - pd.DateOffset(months=config.lookback_months)
                 
                 # Get historical prices for momentum calculation
@@ -341,6 +340,7 @@ def run_backtest(df_long, config, initial_capital):
                 lookback_prices = prices.loc[mask]
                 
                 if len(lookback_prices) < 2:
+                    st.warning(f"⚠️ Insufficient history at {date} (only {len(lookback_prices)} days available)")
                     return Decisions(
                         date=date,
                         universe=universe,
@@ -350,21 +350,32 @@ def run_backtest(df_long, config, initial_capital):
                         cohort_ages={}
                     )
                 
-                # Calculate momentum (total return over lookback period)
-                momentum_returns = quarterly_total_return(lookback_prices)
+                # Calculate returns from lookback start to current date
+                # Get first and last prices over the lookback window
+                returns_dict = {}
+                for ticker in universe:
+                    ticker_data = lookback_prices[ticker].dropna()
+                    if len(ticker_data) >= 2:
+                        start_price = ticker_data.iloc[0]
+                        end_price = ticker_data.iloc[-1]
+                        if start_price > 0:
+                            ret = (end_price - start_price) / start_price
+                            returns_dict[ticker] = ret
                 
-                # Rank by momentum
-                ranks = rank_by_momentum(momentum_returns)
+                if len(returns_dict) == 0:
+                    st.warning(f"⚠️ No valid returns calculated at {date}")
+                    return Decisions(
+                        date=date,
+                        universe=universe,
+                        buys=set(),
+                        sells=set(),
+                        target_weights={},
+                        cohort_ages={}
+                    )
                 
-                # Select top performers for entry
-                entry_bool, threshold_bool = top_n_and_threshold(
-                    ranks,
-                    n=config.entry_count,
-                    threshold=config.exit_rank_threshold
-                )
-                
-                # Get tickers to buy (top entry_count)
-                entry_tickers = set(entry_bool.columns[entry_bool.iloc[0]].tolist()) if len(entry_bool) > 0 else set()
+                # Rank by momentum (higher return = better = lower rank number)
+                sorted_by_return = sorted(returns_dict.items(), key=lambda x: x[1], reverse=True)
+                entry_tickers = set([ticker for ticker, ret in sorted_by_return[:config.entry_count]])
                 entry_tickers = entry_tickers.intersection(universe)  # Ensure available
                 
                 # Equal weight on selected tickers
