@@ -55,6 +55,14 @@ with st.sidebar:
         type=["csv"]
     )
     
+    # Price column selector
+    price_column_choice = st.selectbox(
+        "Price Column to Use",
+        options=["adj_close", "close"],
+        index=0,
+        help="Select which price column to use for backtest calculations"
+    )
+    
     # Strategy parameters
     st.subheader("2. Strategy Parameters")
     
@@ -127,8 +135,18 @@ with st.sidebar:
 # ============================================================================
 
 @st.cache_data
-def load_and_process_data(file_content, filename):
-    """Load and process price data with flexible column handling."""
+def load_and_process_data(file_content, filename, price_column='adj_close'):
+    """Load and process price data with flexible column handling.
+    
+    Args:
+        file_content: CSV file content
+        filename: Name of the uploaded file
+        price_column: Which price column to use ('adj_close' or 'close')
+    
+    Returns:
+        DataFrame with columns [date, ticker, price, volume]
+        where 'price' is the selected price column
+    """
     try:
         # Read CSV - keep original types first to preserve numeric dates
         df = pd.read_csv(StringIO(file_content), dtype=str)  # Read everything as string first
@@ -143,6 +161,12 @@ def load_and_process_data(file_content, filename):
         with st.expander("📋 Column Detection", expanded=False):
             st.write(f"**Available columns:** {list(df.columns)}")
             st.write(f"**Column data types:** {dict(df.dtypes)}")
+            
+            # Show available price columns
+            price_cols = [col for col in df.columns if 'close' in col.lower()]
+            if price_cols:
+                st.write(f"**Available price columns:** {price_cols}")
+                st.info(f"Selected for backtest: **{price_column}**")
         
         # Try to find date column (case-insensitive, common variations)
         date_col = None
@@ -270,8 +294,20 @@ def load_and_process_data(file_content, filename):
         # Remove rows with NaN prices
         df = df.dropna(subset=['close', 'adj_close'])
         
+        # Create a 'price' column based on user selection
+        if price_column == 'adj_close':
+            df['price'] = df['adj_close']
+            st.info(f"✓ Using **Adjusted Close** prices for backtest")
+        elif price_column == 'close':
+            df['price'] = df['close']
+            st.info(f"✓ Using **Close** prices for backtest")
+        else:
+            # Default to adj_close
+            df['price'] = df['adj_close']
+            st.warning(f"Unknown price column '{price_column}', defaulting to Adjusted Close")
+        
         # Select and reorder required columns
-        df = df[['date', 'ticker', 'close', 'adj_close', 'volume']].copy()
+        df = df[['date', 'ticker', 'price', 'volume']].copy()
         
         # Sort and validate
         df = df.sort_values(['ticker', 'date']).reset_index(drop=True)
@@ -442,7 +478,7 @@ if uploaded_file is not None:
     with st.spinner("Loading and processing data..."):
         try:
             file_content = uploaded_file.read().decode("utf-8")
-            df_long = load_and_process_data(file_content, uploaded_file.name)
+            df_long = load_and_process_data(file_content, uploaded_file.name, price_column=price_column_choice)
             
             st.success(f"✓ Loaded {len(df_long)} rows, {df_long['ticker'].nunique()} tickers")
             

@@ -92,17 +92,30 @@ def to_price_matrix(df_long: DataFrame) -> Tuple[DataFrame, DataFrame]:
     Pivot long-format price data to wide matrices.
     
     Args:
-        df_long: DataFrame with columns [date, ticker, adj_close, close, volume].
+        df_long: DataFrame with columns [date, ticker, price, volume].
+                 (price can be adj_close, close, or any selected price column)
     
     Returns:
         Tuple of (prices_wide, volumes_wide):
-        - prices_wide: DataFrame indexed by date, columns=tickers, values=adj_close
+        - prices_wide: DataFrame indexed by date, columns=tickers, values=price
         - volumes_wide: DataFrame indexed by date, columns=tickers, values=volume
     
     Raises:
         ValueError: If required columns missing or data issues detected.
     """
-    required_cols = {"date", "ticker", "adj_close", "volume"}
+    # Check for new format (with 'price' column) or old format (with 'adj_close')
+    if 'price' in df_long.columns:
+        price_col = 'price'
+        required_cols = {"date", "ticker", "price", "volume"}
+    elif 'adj_close' in df_long.columns:
+        price_col = 'adj_close'
+        required_cols = {"date", "ticker", "adj_close", "volume"}
+    else:
+        raise ValueError(
+            f"No price column found. Expected 'price' or 'adj_close'. "
+            f"Got: {set(df_long.columns)}"
+        )
+    
     if not required_cols.issubset(df_long.columns):
         raise ValueError(
             f"Missing required columns. Required: {required_cols}, "
@@ -113,7 +126,7 @@ def to_price_matrix(df_long: DataFrame) -> Tuple[DataFrame, DataFrame]:
     prices_wide = df_long.pivot_table(
         index="date",
         columns="ticker",
-        values="adj_close",
+        values=price_col,
         aggfunc="first"
     )
     
