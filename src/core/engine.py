@@ -147,6 +147,12 @@ class BacktestEngine:
         
         rebalance_days = rebalance_days.sort_values()
         
+        # Only process dates from first rebalance onwards
+        first_rebalance = rebalance_days[0]
+        valid_dates = self.prices.index[self.prices.index >= first_rebalance]
+        
+        logger.info(f"Processing from {first_rebalance.date()} onwards ({len(valid_dates)} dates)")
+        
         # Minimum equity threshold to prevent division errors
         MIN_EQUITY = 1.0
         
@@ -166,8 +172,8 @@ class BacktestEngine:
         current_equity = self.initial_equity
         last_rebalance_idx = 0
         
-        # Process each date
-        for date_idx, date in enumerate(self.prices.index):
+        # Process each date (from first rebalance onwards)
+        for date_idx, date in enumerate(valid_dates):
             # Check if this is a rebalance date
             is_rebalance = date in rebalance_days
             
@@ -293,11 +299,11 @@ class BacktestEngine:
         # Calculate ticker-level quarterly returns
         ticker_quarterly_returns = self._compute_ticker_quarterly_returns(positions_df, rebalance_days)
         
-        # Build result
+        # Build result (use actual start/end dates from the backtest)
         result = BacktestResult(
             config=self.config,
-            start_date=self.prices.index[0],
-            end_date=self.prices.index[-1],
+            start_date=valid_dates[0],
+            end_date=valid_dates[-1],
             equity_curve=equity_series,
             daily_returns=returns_series,
             daily_exposure=exposure_series,

@@ -570,6 +570,12 @@ if uploaded_file is not None:
     # Run backtest button
     if st.button("▶️ Run Backtest", type="primary", width='stretch'):
         
+        # Clear previous results to ensure fresh calculation
+        if "result" in st.session_state:
+            del st.session_state.result
+        if "config" in st.session_state:
+            del st.session_state.config
+        
         # Create config
         try:
             config = Config(
