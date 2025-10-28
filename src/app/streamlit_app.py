@@ -74,7 +74,19 @@ with st.sidebar:
         if "config" in st.session_state:
             del st.session_state.config
         st.session_state.last_price_column = price_column_choice
-        st.info(f"🔄 Price column changed to **{price_column_choice}** - please re-run backtest")
+        st.warning(f"⚠️ Price column changed to **{price_column_choice}** - Results cleared. Please click 'Run Backtest' again.")
+    
+    # Add a manual cache clear button
+    if st.button("🗑️ Clear Cache", help="Clear all cached data and results"):
+        st.cache_data.clear()
+        if "result" in st.session_state:
+            del st.session_state.result
+        if "config" in st.session_state:
+            del st.session_state.config
+        if "last_price_column" in st.session_state:
+            del st.session_state.last_price_column
+        st.success("✓ Cache cleared! Please re-upload your data.")
+        st.rerun()
     
     # Strategy parameters
     st.subheader("2. Strategy Parameters")
@@ -688,12 +700,25 @@ if uploaded_file is not None:
         
         with tab4:
             try:
-                # Calculate quarterly returns with NaN handling
-                returns_filled = result.daily_returns.fillna(0.0)
-                quarterly_returns = (1 + returns_filled).resample('QE').prod() - 1
+                # Calculate quarterly returns using first-to-last day logic (not compounding daily)
+                # Convert daily returns to equity curve
+                equity_curve_for_qtrs = (1 + result.daily_returns.fillna(0.0)).cumprod()
+                
+                # Resample equity to get last value of each quarter
+                quarterly_equity_end = equity_curve_for_qtrs.resample('QE').last()
+                
+                # Get first value of each quarter by shifting
+                quarterly_equity_start = quarterly_equity_end.shift(1)
+                
+                # For first quarter, use the first value in the entire series
+                quarterly_equity_start.iloc[0] = equity_curve_for_qtrs.iloc[0] if len(equity_curve_for_qtrs) > 0 else 1.0
+                
+                # Calculate quarterly returns: (end - start) / start
+                quarterly_returns = (quarterly_equity_end - quarterly_equity_start) / quarterly_equity_start
                 
                 # Debug: Show quarterly stats
                 st.write("**Quarterly Returns Breakdown:**")
+                st.write(f"- Calculation method: First to last business day of each calendar quarter")
                 st.write(f"- Total quarters: {len(quarterly_returns)}")
                 st.write(f"- Positive quarters: {(quarterly_returns > 0).sum()}")
                 st.write(f"- Negative quarters: {(quarterly_returns < 0).sum()}")
@@ -715,9 +740,13 @@ if uploaded_file is not None:
         
         with tab5:
             try:
-                quarterly_returns = result.daily_returns.resample('QE').apply(
-                    lambda x: (1 + x).prod() - 1
-                )
+                # Calculate quarterly returns using first-to-last day logic
+                equity_curve_for_qtrs = (1 + result.daily_returns.fillna(0.0)).cumprod()
+                quarterly_equity_end = equity_curve_for_qtrs.resample('QE').last()
+                quarterly_equity_start = quarterly_equity_end.shift(1)
+                quarterly_equity_start.iloc[0] = equity_curve_for_qtrs.iloc[0] if len(equity_curve_for_qtrs) > 0 else 1.0
+                quarterly_returns = (quarterly_equity_end - quarterly_equity_start) / quarterly_equity_start
+                
                 fig = plot_metrics_dashboard(
                     result.equity_curve,
                     result.daily_returns,

@@ -117,6 +117,8 @@ def calculate_quarterly_hit_ratio(returns: Series) -> float:
     """
     Calculate Quarterly Hit Ratio: % of quarters with positive returns.
     
+    Uses first and last business days of each calendar quarter to calculate returns.
+    
     Args:
         returns: Series of daily returns (as decimals), indexed by date.
     
@@ -133,11 +135,22 @@ def calculate_quarterly_hit_ratio(returns: Series) -> float:
     if not isinstance(returns.index, pd.DatetimeIndex):
         raise ValueError("Returns index must be DatetimeIndex for quarterly resampling")
     
-    # Handle NaN values: replace with 0 (no return on that day)
-    returns_filled = returns.fillna(0.0)
+    # Calculate quarterly returns from equity curve (first to last day of quarter)
+    # Convert daily returns to equity curve
+    equity_curve = (1 + returns.fillna(0.0)).cumprod()
     
-    # Compute quarterly returns
-    quarterly_returns = (1 + returns_filled).resample('QE').prod() - 1
+    # Resample equity to get last value of each quarter
+    quarterly_equity = equity_curve.resample('QE').last()
+    
+    # Get first value of each quarter (shift by 1 to get previous quarter's end)
+    quarterly_start = equity_curve.resample('QE').first()
+    quarterly_start_shifted = quarterly_equity.shift(1)
+    
+    # For first quarter, use the first value in the entire series
+    quarterly_start_shifted.iloc[0] = equity_curve.iloc[0] if len(equity_curve) > 0 else 1.0
+    
+    # Calculate quarterly returns: (end - start) / start
+    quarterly_returns = (quarterly_equity - quarterly_start_shifted) / quarterly_start_shifted
     
     if len(quarterly_returns) == 0:
         logger.warning("No quarterly data found after resampling")
@@ -241,6 +254,8 @@ def create_quarterly_performance_table(returns: Series) -> DataFrame:
     """
     Create a quarterly performance summary table.
     
+    Uses first and last business days of each calendar quarter to calculate returns.
+    
     Args:
         returns: Series of daily returns (as decimals), indexed by date.
     
@@ -259,11 +274,21 @@ def create_quarterly_performance_table(returns: Series) -> DataFrame:
     if not isinstance(returns.index, pd.DatetimeIndex):
         raise ValueError("Returns index must be DatetimeIndex")
     
-    # Handle NaN values: replace with 0
-    returns_filled = returns.fillna(0.0)
+    # Calculate quarterly returns from equity curve (first to last day of quarter)
+    # Convert daily returns to equity curve
+    equity_curve = (1 + returns.fillna(0.0)).cumprod()
     
-    # Resample to quarterly
-    quarterly_returns = (1 + returns_filled).resample('QE').prod() - 1
+    # Resample equity to get last value of each quarter
+    quarterly_equity_end = equity_curve.resample('QE').last()
+    
+    # Get first value of each quarter by shifting
+    quarterly_equity_start = quarterly_equity_end.shift(1)
+    
+    # For first quarter, use the first value in the entire series
+    quarterly_equity_start.iloc[0] = equity_curve.iloc[0] if len(equity_curve) > 0 else 1.0
+    
+    # Calculate quarterly returns: (end - start) / start
+    quarterly_returns = (quarterly_equity_end - quarterly_equity_start) / quarterly_equity_start
     
     # Compute cumulative return from start
     cumulative = (1 + quarterly_returns).cumprod() - 1
