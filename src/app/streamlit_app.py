@@ -60,8 +60,21 @@ with st.sidebar:
         "Price Column to Use",
         options=["adj_close", "close"],
         index=0,
-        help="Select which price column to use for backtest calculations"
+        help="Select which price column to use for backtest calculations",
+        key="price_column_selector"
     )
+    
+    # Clear results if price column changed
+    if "last_price_column" not in st.session_state:
+        st.session_state.last_price_column = price_column_choice
+    elif st.session_state.last_price_column != price_column_choice:
+        # Price column changed - clear cached results
+        if "result" in st.session_state:
+            del st.session_state.result
+        if "config" in st.session_state:
+            del st.session_state.config
+        st.session_state.last_price_column = price_column_choice
+        st.info(f"🔄 Price column changed to **{price_column_choice}** - please re-run backtest")
     
     # Strategy parameters
     st.subheader("2. Strategy Parameters")
@@ -146,7 +159,12 @@ def load_and_process_data(file_content, filename, price_column='adj_close'):
     Returns:
         DataFrame with columns [date, ticker, price, volume]
         where 'price' is the selected price column
+        
+    Note: The cache key includes price_column, so changing it will reload the data.
     """
+    # Add debug to confirm cache miss
+    st.write(f"🔄 Loading data with price_column=**{price_column}**")
+    
     try:
         # Read CSV - keep original types first to preserve numeric dates
         df = pd.read_csv(StringIO(file_content), dtype=str)  # Read everything as string first
@@ -325,8 +343,20 @@ def run_backtest(df_long, config, initial_capital):
     try:
         st.write(f"**Engine initialization:** initial_capital = ${initial_capital:,.2f}")
         
+        # Debug: Show what price column we're using
+        st.write(f"**Price data info:**")
+        st.write(f"- First ticker: {df_long['ticker'].iloc[0]}")
+        st.write(f"- First date: {df_long['date'].iloc[0]}")
+        st.write(f"- First price value: ${df_long['price'].iloc[0]:.2f}")
+        st.write(f"- Mean price across all data: ${df_long['price'].mean():.2f}")
+        
         # Convert to price matrix
         prices, volumes = to_price_matrix(df_long)
+        
+        # Debug: Show price matrix info
+        st.write(f"**Price matrix info:**")
+        st.write(f"- Shape: {prices.shape}")
+        st.write(f"- First ticker mean price: ${prices.iloc[:, 0].mean():.2f}")
         
         # Validate
         validate_panel(prices, min_history_days=config.min_history_days)
