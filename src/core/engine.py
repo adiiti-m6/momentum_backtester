@@ -42,6 +42,7 @@ class BacktestResult:
     
     # Ticker performance tracking
     ticker_quarterly_returns: Optional[DataFrame] = None  # quarter x ticker -> return %
+    quarterly_selections: Optional[DataFrame] = None  # quarter x ticker -> momentum score at selection
     
     # Summary stats
     total_return: float = 0.0
@@ -208,6 +209,7 @@ class BacktestEngine:
                 for ticker, weight in filtered_weights.items():
                     price = available_prices[ticker]
                     if price > 0:
+                        # Calculate shares based on target weight of CURRENT portfolio value
                         target_shares[ticker] = (current_equity * weight) / price
                 
                 # Compute trades (current -> target)
@@ -218,9 +220,15 @@ class BacktestEngine:
                     available_prices
                 )
                 
-                # Execute trades and update equity
+                # Execute trades and update cash
+                # Note: When we buy stocks, cash decreases. When we sell, cash increases.
                 for trade in trades:
-                    current_equity -= trade.transaction_cost
+                    if trade.side == 'BUY':
+                        # Buying: reduce cash by cost + fees
+                        current_equity -= (trade.gross_cost + trade.transaction_cost)
+                    else:  # SELL
+                        # Selling: increase cash by proceeds - fees
+                        current_equity += (trade.gross_cost - trade.transaction_cost)
                     trades_list.append(trade)
                 
                 # Update positions to target (after all trades executed)
@@ -235,7 +243,7 @@ class BacktestEngine:
             # Mark to market for all dates
             available_prices = self.prices.loc[date]
             
-            # Compute portfolio value at market prices
+            # Compute portfolio value at market prices (value of all holdings)
             current_value = 0.0
             
             for ticker, shares in list(current_positions.items()):
@@ -247,8 +255,7 @@ class BacktestEngine:
                     logger.warning(f"Price missing for {ticker} on {date}; dropping position")
                     current_positions.pop(ticker, None)
             
-            # Portfolio equity = cash + position values
-            # Start with whatever cash we have left after trades
+            # Total portfolio equity = cash + market value of positions
             portfolio_equity = current_equity + current_value
             
             # Check for critically low equity
@@ -299,6 +306,9 @@ class BacktestEngine:
         # Calculate ticker-level quarterly returns
         ticker_quarterly_returns = self._compute_ticker_quarterly_returns(positions_df, rebalance_days)
         
+        # Calculate quarterly selections with momentum scores
+        quarterly_selections = self._compute_quarterly_selections(positions_df, rebalance_days)
+        
         # Build result (use actual start/end dates from the backtest)
         result = BacktestResult(
             config=self.config,
@@ -311,7 +321,8 @@ class BacktestEngine:
             positions=positions_df,
             weights=weights_df,
             trades=trades_list,
-            ticker_quarterly_returns=ticker_quarterly_returns
+            ticker_quarterly_returns=ticker_quarterly_returns,
+            quarterly_selections=quarterly_selections
         )
         
         result.compute_summary_stats()
@@ -416,13 +427,16 @@ class BacktestEngine:
         
         quarterly_returns = {}
         
+        # Get the actual start date of the backtest (first rebalance)
+        backtest_start = rebalance_days[0]
+        
         # Process each quarter (from one rebalance to the next)
         for i in range(len(rebalance_days)):
             quarter_end = rebalance_days[i]
             
-            # Get quarter start (previous rebalance or beginning of data)
+            # Get quarter start (previous rebalance or first rebalance date)
             if i == 0:
-                quarter_start = self.prices.index[0]
+                quarter_start = backtest_start
             else:
                 quarter_start = rebalance_days[i - 1]
             
@@ -467,6 +481,66 @@ class BacktestEngine:
         
         # Convert to DataFrame
         result_df = DataFrame(quarterly_returns).T
+        result_df.index.name = 'Quarter End'
+        
+        return result_df
+    
+    def _compute_quarterly_selections(
+        self,
+        positions_df: DataFrame,
+        rebalance_days: DatetimeIndex
+    ) -> DataFrame:
+        """
+        Compute momentum scores for tickers selected at each quarter.
+        
+        Shows which tickers were selected and their momentum (lookback return)
+        at the time of selection.
+        
+        Args:
+            positions_df: DataFrame of positions (date x ticker)
+            rebalance_days: Quarter-end rebalance dates
+            
+        Returns:
+            DataFrame with quarters as rows, tickers as columns, values = momentum score %
+        """
+        if len(rebalance_days) == 0:
+            return DataFrame()
+        
+        quarterly_selections = {}
+        lookback_months = self.config.lookback_months
+        
+        for rebalance_date in rebalance_days:
+            # Get tickers held at this rebalance
+            if rebalance_date not in positions_df.index:
+                continue
+                
+            held_tickers = positions_df.loc[rebalance_date]
+            held_tickers = held_tickers[held_tickers > 0].index.tolist()
+            
+            # Calculate momentum for each held ticker
+            momentum_scores = {}
+            lookback_start = rebalance_date - pd.DateOffset(months=lookback_months)
+            
+            for ticker in held_tickers:
+                if ticker not in self.prices.columns:
+                    continue
+                
+                # Get prices for lookback period
+                ticker_prices = self.prices[ticker]
+                mask = (ticker_prices.index >= lookback_start) & (ticker_prices.index <= rebalance_date)
+                lookback_prices = ticker_prices[mask].dropna()
+                
+                if len(lookback_prices) >= 2:
+                    start_price = lookback_prices.iloc[0]
+                    end_price = lookback_prices.iloc[-1]
+                    if start_price > 0:
+                        momentum = (end_price - start_price) / start_price
+                        momentum_scores[ticker] = momentum
+            
+            quarterly_selections[rebalance_date] = momentum_scores
+        
+        # Convert to DataFrame
+        result_df = DataFrame(quarterly_selections).T
         result_df.index.name = 'Quarter End'
         
         return result_df

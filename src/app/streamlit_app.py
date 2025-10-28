@@ -10,6 +10,7 @@ import pandas as pd
 import numpy as np
 from io import StringIO
 import logging
+import plotly.graph_objects as go
 
 from src.core.config import Config
 from src.core.data_loader import to_price_matrix, validate_panel
@@ -462,24 +463,11 @@ def run_backtest(df_long, config, initial_capital):
                 entry_tickers = set([ticker for ticker, ret in sorted_by_return[:config.entry_count]])
                 entry_tickers = entry_tickers.intersection(universe)  # Ensure available
                 
-                # Equal CAPITAL allocation (not equal weight)
-                # Divide total equity equally among selected tickers
+                # Equal weight allocation (each ticker gets same % of portfolio)
+                # The engine will convert this to equal dollar amounts based on current_equity
                 if len(entry_tickers) > 0:
-                    capital_per_ticker = current_equity / len(entry_tickers)
-                    
-                    # Calculate weights based on equal capital allocation
-                    target_weights = {}
-                    for ticker in entry_tickers:
-                        ticker_price = available_prices[ticker]
-                        if ticker_price > 0:
-                            # Weight = (Capital allocated to ticker) / (Total equity)
-                            # This ensures each ticker gets equal dollar amount
-                            target_weights[ticker] = capital_per_ticker / current_equity
-                    
-                    # Normalize weights to sum to 1.0
-                    total_weight = sum(target_weights.values())
-                    if total_weight > 0:
-                        target_weights = {t: w / total_weight for t, w in target_weights.items()}
+                    weight = 1.0 / len(entry_tickers)
+                    target_weights = {ticker: weight for ticker in entry_tickers}
                 else:
                     target_weights = {}
                 
@@ -659,6 +647,16 @@ if uploaded_file is not None:
             st.dataframe(last_returns, width='stretch')
         
         metrics = compute_performance_metrics(result.daily_returns)
+        
+        # Debug: Show what's in the result
+        st.write("**🔍 Debug Info:**")
+        st.write(f"- Equity curve start: ${result.equity_curve.iloc[0]:,.2f}")
+        st.write(f"- Equity curve end: ${result.equity_curve.iloc[-1]:,.2f}")
+        st.write(f"- Calculated total return: {result.total_return:.2%}")
+        st.write(f"- Calculated CAGR (from result): {result.annualized_return:.2%}")
+        st.write(f"- Analytics CAGR: {metrics['cagr']:.2%}")
+        st.write(f"- Days in backtest: {len(result.daily_returns)}")
+        st.write(f"- Date range: {result.start_date.date()} to {result.end_date.date()}")
         
         col1, col2, col3, col4 = st.columns(4)
         
@@ -879,6 +877,115 @@ if uploaded_file is not None:
                 st.plotly_chart(fig, width='stretch')
             except Exception as e:
                 st.error(f"Error plotting dashboard: {str(e)}")
+        
+        # Quarterly Portfolio Selections
+        st.subheader("📋 Quarterly Portfolio Selections & Capital")
+        
+        if result.quarterly_selections is not None and not result.quarterly_selections.empty:
+            st.write("**Stocks selected each quarter with their momentum scores and portfolio value**")
+            st.write("Momentum = % return over lookback period (used for ranking and selection)")
+            
+            # Create summary table with capital values
+            selection_summary = []
+            for quarter_end in result.quarterly_selections.index:
+                quarter_data = result.quarterly_selections.loc[quarter_end].dropna()
+                
+                # Get portfolio value at quarter end
+                if quarter_end in result.equity_curve.index:
+                    portfolio_value = result.equity_curve.loc[quarter_end]
+                else:
+                    portfolio_value = None
+                
+                if len(quarter_data) > 0:
+                    # Sort by momentum (highest first)
+                    quarter_data_sorted = quarter_data.sort_values(ascending=False)
+                    
+                    row = {
+                        'Quarter End': quarter_end.strftime('%Y-%m-%d'),
+                        'Portfolio Value': f"${portfolio_value:,.0f}" if portfolio_value is not None else "N/A",
+                        'Stocks Selected': len(quarter_data),
+                        'Top 5 Tickers': ', '.join(quarter_data_sorted.head(5).index.tolist()),
+                        'Top 5 Momentum': ', '.join([f"{v:.1%}" for v in quarter_data_sorted.head(5).values]),
+                        'Avg Momentum': f"{quarter_data.mean():.2%}",
+                        'Best Momentum': f"{quarter_data.max():.2%}",
+                        'Worst Momentum': f"{quarter_data.min():.2%}"
+                    }
+                    selection_summary.append(row)
+            
+            if selection_summary:
+                summary_df = pd.DataFrame(selection_summary)
+                st.dataframe(summary_df, width='stretch')
+                
+                # Expandable full details
+                with st.expander("📊 View All Selected Tickers with Momentum Scores", expanded=False):
+                    st.write("All tickers selected each quarter with their momentum scores (%)")
+                    display_selections = (result.quarterly_selections * 100).round(2)
+                    st.dataframe(display_selections, width='stretch')
+                
+                # Download option
+                csv_selections = (result.quarterly_selections * 100).round(4).to_csv()
+                st.download_button(
+                    label="📥 Download Quarterly Selections CSV",
+                    data=csv_selections,
+                    file_name="quarterly_selections.csv",
+                    mime="text/csv"
+                )
+                
+                # Show quarterly capital growth chart
+                st.write("**📈 Portfolio Value Growth by Quarter**")
+                
+                # Extract quarterly values
+                quarterly_values = []
+                for quarter_end in result.quarterly_selections.index:
+                    if quarter_end in result.equity_curve.index:
+                        portfolio_value = result.equity_curve.loc[quarter_end]
+                        quarterly_values.append({
+                            'Quarter': quarter_end.strftime('%Y-%m-%d'),
+                            'Value': portfolio_value
+                        })
+                
+                if quarterly_values:
+                    qv_df = pd.DataFrame(quarterly_values)
+                    
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=qv_df['Quarter'],
+                        y=qv_df['Value'],
+                        mode='lines+markers',
+                        name='Portfolio Value',
+                        line=dict(color='#1f77b4', width=2),
+                        marker=dict(size=8)
+                    ))
+                    
+                    # Add starting capital line
+                    fig.add_hline(y=initial_capital, line_dash="dash", line_color="gray",
+                                 annotation_text=f"Starting Capital: ${initial_capital:,.0f}",
+                                 annotation_position="right")
+                    
+                    fig.update_layout(
+                        title="Quarterly Portfolio Value",
+                        xaxis_title="Quarter End",
+                        yaxis_title="Portfolio Value ($)",
+                        hovermode='x unified',
+                        height=400
+                    )
+                    
+                    st.plotly_chart(fig, width='stretch')
+                    
+                    # Show capital summary
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Starting Capital", f"${initial_capital:,.0f}")
+                    with col2:
+                        current_value = qv_df['Value'].iloc[-1]
+                        st.metric("Current Value", f"${current_value:,.0f}")
+                    with col3:
+                        total_gain = current_value - initial_capital
+                        st.metric("Total Gain/Loss", f"${total_gain:,.0f}", 
+                                 delta=f"{(total_gain/initial_capital)*100:.1f}%")
+                    
+        else:
+            st.info("No quarterly selection data available")
         
         # Holdings and trades tables
         st.subheader("📋 Holdings & Trades")
