@@ -147,7 +147,7 @@ with st.sidebar:
 # MAIN APP: Data Loading and Caching
 # ============================================================================
 
-@st.cache_data
+@st.cache_data(show_spinner=False)
 def load_and_process_data(file_content, filename, price_column='adj_close'):
     """Load and process price data with flexible column handling.
     
@@ -162,10 +162,10 @@ def load_and_process_data(file_content, filename, price_column='adj_close'):
         
     Note: The cache key includes price_column, so changing it will reload the data.
     """
-    # Add debug to confirm cache miss
-    st.write(f"🔄 Loading data with price_column=**{price_column}**")
-    
     try:
+        # Debug: Show which price column we're loading
+        print(f"[CACHE MISS] Loading data with price_column={price_column}")
+        
         # Read CSV - keep original types first to preserve numeric dates
         df = pd.read_csv(StringIO(file_content), dtype=str)  # Read everything as string first
         
@@ -315,10 +315,10 @@ def load_and_process_data(file_content, filename, price_column='adj_close'):
         # Create a 'price' column based on user selection
         if price_column == 'adj_close':
             df['price'] = df['adj_close']
-            st.info(f"✓ Using **Adjusted Close** prices for backtest")
+            print(f"[DATA LOAD] Using adj_close - Sample: {df['adj_close'].head(3).tolist()}")
         elif price_column == 'close':
             df['price'] = df['close']
-            st.info(f"✓ Using **Close** prices for backtest")
+            print(f"[DATA LOAD] Using close - Sample: {df['close'].head(3).tolist()}")
         else:
             # Default to adj_close
             df['price'] = df['adj_close']
@@ -510,10 +510,20 @@ if uploaded_file is not None:
             file_content = uploaded_file.read().decode("utf-8")
             df_long = load_and_process_data(file_content, uploaded_file.name, price_column=price_column_choice)
             
-            st.success(f"✓ Loaded {len(df_long)} rows, {df_long['ticker'].nunique()} tickers")
+            # Show which price column was actually used
+            if price_column_choice == 'adj_close':
+                st.success(f"✓ Loaded {len(df_long)} rows, {df_long['ticker'].nunique()} tickers using **Adjusted Close** prices")
+            else:
+                st.success(f"✓ Loaded {len(df_long)} rows, {df_long['ticker'].nunique()} tickers using **Close** prices")
             
             # Show data preview
             with st.expander("📊 Data Preview", expanded=False):
+                # Show which column is being used with actual data comparison
+                st.write("**Price Column Confirmation:**")
+                sample_data = df_long.head(5)[['date', 'ticker', 'price']].copy()
+                st.write(f"Using **{price_column_choice}** as price column:")
+                st.dataframe(sample_data, use_container_width=True)
+                
                 st.dataframe(df_long.head(20), use_container_width=True)
                 st.write(f"Date range: {df_long['date'].min().date()} to {df_long['date'].max().date()}")
                 st.write(f"Tickers: {', '.join(sorted(df_long['ticker'].unique()))}")
