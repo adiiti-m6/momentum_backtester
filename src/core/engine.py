@@ -40,6 +40,9 @@ class BacktestResult:
     # Trade ledger
     trades: List[Trade] = field(default_factory=list)
     
+    # Ticker performance tracking
+    ticker_quarterly_returns: Optional[DataFrame] = None  # quarter x ticker -> return %
+    
     # Summary stats
     total_return: float = 0.0
     annualized_return: float = 0.0
@@ -287,6 +290,9 @@ class BacktestEngine:
         positions_df = self._dict_to_dataframe(positions_dict)
         weights_df = self._dict_to_dataframe(weights_dict)
         
+        # Calculate ticker-level quarterly returns
+        ticker_quarterly_returns = self._compute_ticker_quarterly_returns(positions_df, rebalance_days)
+        
         # Build result
         result = BacktestResult(
             config=self.config,
@@ -298,7 +304,8 @@ class BacktestEngine:
             daily_turnover=turnover_series,
             positions=positions_df,
             weights=weights_df,
-            trades=trades_list
+            trades=trades_list,
+            ticker_quarterly_returns=ticker_quarterly_returns
         )
         
         result.compute_summary_stats()
@@ -377,3 +384,83 @@ class BacktestEngine:
         df = DataFrame(data_dict).T
         df.index = pd.to_datetime(df.index)
         return df.fillna(0.0)
+    
+    def _compute_ticker_quarterly_returns(
+        self,
+        positions_df: DataFrame,
+        rebalance_days: DatetimeIndex
+    ) -> DataFrame:
+        """
+        Compute quarterly returns for each ticker that was held.
+        
+        For each ticker in each quarter, calculate:
+        Return = (Price at Quarter End - Price at Quarter Start) / Price at Quarter Start
+        
+        Only includes tickers that were actually held during the quarter.
+        
+        Args:
+            positions_df: DataFrame of positions (date x ticker)
+            rebalance_days: Quarter-end rebalance dates
+            
+        Returns:
+            DataFrame with quarters as rows, tickers as columns, values = quarterly returns
+        """
+        if len(rebalance_days) == 0:
+            return DataFrame()
+        
+        quarterly_returns = {}
+        
+        # Process each quarter (from one rebalance to the next)
+        for i in range(len(rebalance_days)):
+            quarter_end = rebalance_days[i]
+            
+            # Get quarter start (previous rebalance or beginning of data)
+            if i == 0:
+                quarter_start = self.prices.index[0]
+            else:
+                quarter_start = rebalance_days[i - 1]
+            
+            # Get tickers held during this quarter
+            # Look at positions on the quarter_end date
+            if quarter_end in positions_df.index:
+                held_tickers = positions_df.loc[quarter_end]
+                held_tickers = held_tickers[held_tickers > 0].index.tolist()
+            else:
+                held_tickers = []
+            
+            # Calculate returns for each held ticker
+            ticker_returns = {}
+            for ticker in held_tickers:
+                if ticker not in self.prices.columns:
+                    continue
+                
+                # Get prices at quarter start and end
+                ticker_prices = self.prices[ticker]
+                
+                # Find actual available prices closest to quarter boundaries
+                start_price = None
+                end_price = None
+                
+                # Get start price (first available on or after quarter_start)
+                start_mask = ticker_prices.index >= quarter_start
+                if start_mask.any():
+                    start_price = ticker_prices[start_mask].dropna().iloc[0] if len(ticker_prices[start_mask].dropna()) > 0 else None
+                
+                # Get end price (last available on or before quarter_end)
+                end_mask = ticker_prices.index <= quarter_end
+                if end_mask.any():
+                    end_price = ticker_prices[end_mask].dropna().iloc[-1] if len(ticker_prices[end_mask].dropna()) > 0 else None
+                
+                # Calculate return
+                if start_price is not None and end_price is not None and start_price > 0:
+                    ticker_return = (end_price - start_price) / start_price
+                    ticker_returns[ticker] = ticker_return
+            
+            # Store this quarter's returns
+            quarterly_returns[quarter_end] = ticker_returns
+        
+        # Convert to DataFrame
+        result_df = DataFrame(quarterly_returns).T
+        result_df.index.name = 'Quarter End'
+        
+        return result_df

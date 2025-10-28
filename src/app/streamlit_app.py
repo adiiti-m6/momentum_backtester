@@ -534,9 +534,9 @@ if uploaded_file is not None:
                 st.write("**Price Column Confirmation:**")
                 sample_data = df_long.head(5)[['date', 'ticker', 'price']].copy()
                 st.write(f"Using **{price_column_choice}** as price column:")
-                st.dataframe(sample_data, use_container_width=True)
+                st.dataframe(sample_data, width='stretch')
                 
-                st.dataframe(df_long.head(20), use_container_width=True)
+                st.dataframe(df_long.head(20), width='stretch')
                 st.write(f"Date range: {df_long['date'].min().date()} to {df_long['date'].max().date()}")
                 st.write(f"Tickers: {', '.join(sorted(df_long['ticker'].unique()))}")
         except Exception as e:
@@ -548,7 +548,7 @@ if uploaded_file is not None:
             st.stop()
     
     # Run backtest button
-    if st.button("▶️ Run Backtest", type="primary", use_container_width=True):
+    if st.button("▶️ Run Backtest", type="primary", width='stretch'):
         
         # Create config
         try:
@@ -621,14 +621,14 @@ if uploaded_file is not None:
                 'Date': result.daily_returns.index[:20].strftime('%Y-%m-%d'),
                 'Return': (result.daily_returns.iloc[:20] * 100).round(4)
             })
-            st.dataframe(first_returns, use_container_width=True)
+            st.dataframe(first_returns, width='stretch')
         
         with st.expander("📋 Last 20 Daily Returns", expanded=False):
             last_returns = pd.DataFrame({
                 'Date': result.daily_returns.index[-20:].strftime('%Y-%m-%d'),
                 'Return': (result.daily_returns.iloc[-20:] * 100).round(4)
             })
-            st.dataframe(last_returns, use_container_width=True)
+            st.dataframe(last_returns, width='stretch')
         
         metrics = compute_performance_metrics(result.daily_returns)
         
@@ -669,32 +669,33 @@ if uploaded_file is not None:
         # Equity curve and other plots
         st.subheader("📉 Performance Charts")
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "Equity Curve",
             "Drawdown",
             "Rolling Sharpe",
             "Quarterly Returns",
+            "Ticker Performance",
             "Dashboard"
         ])
         
         with tab1:
             try:
                 fig = plot_equity_curve(result.equity_curve)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except Exception as e:
                 st.error(f"Error plotting equity curve: {str(e)}")
         
         with tab2:
             try:
                 fig = plot_drawdown(result.equity_curve)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except Exception as e:
                 st.error(f"Error plotting drawdown: {str(e)}")
         
         with tab3:
             try:
                 fig = plot_rolling_sharpe(result.daily_returns)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except Exception as e:
                 st.error(f"Error plotting rolling Sharpe: {str(e)}")
         
@@ -726,7 +727,7 @@ if uploaded_file is not None:
                 st.write(f"- Worst quarter: {quarterly_returns.min():.2%}")
                 
                 fig = plot_quarterly_hit_ratio(quarterly_returns)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 
                 # Show quarterly returns table
                 with st.expander("📊 View All Quarterly Returns", expanded=False):
@@ -734,11 +735,106 @@ if uploaded_file is not None:
                         'Quarter End': quarterly_returns.index.strftime('%Y-%m-%d'),
                         'Return (%)': (quarterly_returns * 100).round(2)
                     })
-                    st.dataframe(quarterly_df, use_container_width=True)
+                    st.dataframe(quarterly_df, width='stretch')
             except Exception as e:
                 st.error(f"Error plotting quarterly returns: {str(e)}")
         
         with tab5:
+            try:
+                st.write("**Individual Ticker Quarterly Performance**")
+                st.write("Returns calculated from quarter start to quarter end prices for each held ticker")
+                
+                if result.ticker_quarterly_returns is not None and not result.ticker_quarterly_returns.empty:
+                    ticker_qtrs = result.ticker_quarterly_returns
+                    
+                    # Calculate portfolio quarterly returns for comparison
+                    equity_curve_for_qtrs = (1 + result.daily_returns.fillna(0.0)).cumprod()
+                    quarterly_equity_end = equity_curve_for_qtrs.resample('QE').last()
+                    quarterly_equity_start = quarterly_equity_end.shift(1)
+                    quarterly_equity_start.iloc[0] = equity_curve_for_qtrs.iloc[0] if len(equity_curve_for_qtrs) > 0 else 1.0
+                    portfolio_quarterly_returns = (quarterly_equity_end - quarterly_equity_start) / quarterly_equity_start
+                    
+                    # Summary statistics
+                    st.write("**Summary Statistics:**")
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        total_ticker_quarters = ticker_qtrs.notna().sum().sum()
+                        st.metric("Total Ticker-Quarters", total_ticker_quarters)
+                    
+                    with col2:
+                        positive_ticker_quarters = (ticker_qtrs > 0).sum().sum()
+                        ticker_hit_ratio = positive_ticker_quarters / total_ticker_quarters if total_ticker_quarters > 0 else 0
+                        st.metric("Ticker Hit Ratio", f"{ticker_hit_ratio:.1%}", 
+                                 help="% of individual ticker holdings that had positive returns")
+                    
+                    with col3:
+                        avg_ticker_return = ticker_qtrs.mean().mean()
+                        st.metric("Avg Ticker Return/Quarter", f"{avg_ticker_return:.2%}")
+                    
+                    with col4:
+                        best_ticker_return = ticker_qtrs.max().max()
+                        st.metric("Best Ticker-Quarter", f"{best_ticker_return:.2%}")
+                    
+                    # Detailed table with portfolio comparison
+                    st.write("**Quarterly Performance Table:**")
+                    
+                    # Create comparison table
+                    display_data = []
+                    for quarter_end in ticker_qtrs.index:
+                        row_data = {'Quarter End': quarter_end.strftime('%Y-%m-%d')}
+                        
+                        # Get portfolio return for this quarter
+                        if quarter_end in portfolio_quarterly_returns.index:
+                            portfolio_ret = portfolio_quarterly_returns.loc[quarter_end]
+                            row_data['Portfolio Return'] = f"{portfolio_ret:.2%}"
+                        else:
+                            row_data['Portfolio Return'] = "N/A"
+                        
+                        # Get ticker returns for this quarter
+                        ticker_rets = ticker_qtrs.loc[quarter_end].dropna()
+                        
+                        # Count positive/negative tickers
+                        n_positive = (ticker_rets > 0).sum()
+                        n_negative = (ticker_rets < 0).sum()
+                        n_total = len(ticker_rets)
+                        
+                        row_data['Tickers Held'] = n_total
+                        row_data['Positive'] = n_positive
+                        row_data['Negative'] = n_negative
+                        row_data['Hit Ratio'] = f"{n_positive/n_total:.1%}" if n_total > 0 else "N/A"
+                        row_data['Avg Ticker Return'] = f"{ticker_rets.mean():.2%}" if n_total > 0 else "N/A"
+                        row_data['Best Ticker'] = f"{ticker_rets.max():.2%}" if n_total > 0 else "N/A"
+                        row_data['Worst Ticker'] = f"{ticker_rets.min():.2%}" if n_total > 0 else "N/A"
+                        
+                        display_data.append(row_data)
+                    
+                    comparison_df = pd.DataFrame(display_data)
+                    st.dataframe(comparison_df, width='stretch')
+                    
+                    # Expandable section for full ticker details
+                    with st.expander("📊 View All Ticker Returns by Quarter", expanded=False):
+                        st.write("All individual ticker returns (% per quarter):")
+                        display_ticker_qtrs = (ticker_qtrs * 100).round(2)
+                        st.dataframe(display_ticker_qtrs, width='stretch')
+                    
+                    # Download option
+                    csv_ticker_returns = (ticker_qtrs * 100).round(4).to_csv()
+                    st.download_button(
+                        label="📥 Download Ticker Returns CSV",
+                        data=csv_ticker_returns,
+                        file_name="ticker_quarterly_returns.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.info("No ticker-level performance data available")
+                    
+            except Exception as e:
+                st.error(f"Error displaying ticker performance: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
+        
+        with tab6:
             try:
                 # Calculate quarterly returns using first-to-last day logic
                 equity_curve_for_qtrs = (1 + result.daily_returns.fillna(0.0)).cumprod()
@@ -752,7 +848,7 @@ if uploaded_file is not None:
                     result.daily_returns,
                     quarterly_returns
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             except Exception as e:
                 st.error(f"Error plotting dashboard: {str(e)}")
         
@@ -769,7 +865,7 @@ if uploaded_file is not None:
                     "Ticker": final_positions.index,
                     "Shares": final_positions.values
                 }).head(10)
-                st.dataframe(holdings_df, use_container_width=True)
+                st.dataframe(holdings_df, width='stretch')
             else:
                 st.info("No holdings in final period")
         
@@ -787,7 +883,7 @@ if uploaded_file is not None:
                     }
                     for t in result.trades[-10:]
                 ])
-                st.dataframe(trades_df, use_container_width=True)
+                st.dataframe(trades_df, width='stretch')
             else:
                 st.info("No trades executed")
         
@@ -875,7 +971,7 @@ else:
         'Volume': ['1.67E+08', '1.67E+08', '2.37E+08'],
         'Ticker': ['AAPL', 'AAPL', 'AAPL']
     })
-    st.dataframe(example_df, use_container_width=True)
+    st.dataframe(example_df, width='stretch')
     
     col1, col2 = st.columns(2)
     with col1:
