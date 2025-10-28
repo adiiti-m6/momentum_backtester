@@ -622,15 +622,15 @@ if uploaded_file is not None:
         # Key metrics
         st.subheader("📈 Key Performance Metrics")
         
-        # Debug: Daily returns analysis
-        st.write("**Daily Returns Debug:**")
-        st.write(f"- Total trading days: {len(result.daily_returns)}")
-        st.write(f"- Date range: {result.daily_returns.index.min()} to {result.daily_returns.index.max()}")
-        st.write(f"- Days with non-zero returns: {(result.daily_returns.abs() > 1e-10).sum()}")
-        st.write(f"- Days with NaN returns: {result.daily_returns.isna().sum()}")
-        st.write(f"- Days with zero returns: {(result.daily_returns.abs() <= 1e-10).sum()}")
-        st.write(f"- Mean daily return: {result.daily_returns.mean():.6f}")
-        st.write(f"- Std daily return: {result.daily_returns.std():.6f}")
+        # # Debug: Daily returns analysis
+        # st.write("**Daily Returns Debug:**")
+        # st.write(f"- Total trading days: {len(result.daily_returns)}")
+        # st.write(f"- Date range: {result.daily_returns.index.min()} to {result.daily_returns.index.max()}")
+        # st.write(f"- Days with non-zero returns: {(result.daily_returns.abs() > 1e-10).sum()}")
+        # st.write(f"- Days with NaN returns: {result.daily_returns.isna().sum()}")
+        # st.write(f"- Days with zero returns: {(result.daily_returns.abs() <= 1e-10).sum()}")
+        # st.write(f"- Mean daily return: {result.daily_returns.mean():.6f}")
+        # st.write(f"- Std daily return: {result.daily_returns.std():.6f}")
         
         with st.expander("📋 First 20 Daily Returns", expanded=False):
             first_returns = pd.DataFrame({
@@ -649,14 +649,14 @@ if uploaded_file is not None:
         metrics = compute_performance_metrics(result.daily_returns)
         
         # Debug: Show what's in the result
-        st.write("**🔍 Debug Info:**")
-        st.write(f"- Equity curve start: ${result.equity_curve.iloc[0]:,.2f}")
-        st.write(f"- Equity curve end: ${result.equity_curve.iloc[-1]:,.2f}")
-        st.write(f"- Calculated total return: {result.total_return:.2%}")
-        st.write(f"- Calculated CAGR (from result): {result.annualized_return:.2%}")
-        st.write(f"- Analytics CAGR: {metrics['cagr']:.2%}")
-        st.write(f"- Days in backtest: {len(result.daily_returns)}")
-        st.write(f"- Date range: {result.start_date.date()} to {result.end_date.date()}")
+        # st.write("**🔍 Debug Info:**")
+        # st.write(f"- Equity curve start: ${result.equity_curve.iloc[0]:,.2f}")
+        # st.write(f"- Equity curve end: ${result.equity_curve.iloc[-1]:,.2f}")
+        # st.write(f"- Calculated total return: {result.total_return:.2%}")
+        # st.write(f"- Calculated CAGR (from result): {result.annualized_return:.2%}")
+        # st.write(f"- Analytics CAGR: {metrics['cagr']:.2%}")
+        # st.write(f"- Days in backtest: {len(result.daily_returns)}")
+        # st.write(f"- Date range: {result.start_date.date()} to {result.end_date.date()}")
         
         col1, col2, col3, col4 = st.columns(4)
         
