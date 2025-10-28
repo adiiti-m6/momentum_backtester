@@ -195,7 +195,7 @@ def load_and_process_data(file_content, filename):
         
         # Strategy 3: If still NaN, try other common formats
         if df['date'].isna().all():
-            for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y/%m/%d', '%m-%d-%Y']:
+            for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%d-%m-%Y', '%Y/%m/%d', '%m-%d-%Y', '%Y-%d-%m']:
                 df['date'] = pd.to_datetime(df['date'].astype(str), format=fmt, errors='coerce')
                 if df['date'].notna().any():
                     break
@@ -518,6 +518,30 @@ if uploaded_file is not None:
         # Key metrics
         st.subheader("📈 Key Performance Metrics")
         
+        # Debug: Daily returns analysis
+        st.write("**Daily Returns Debug:**")
+        st.write(f"- Total trading days: {len(result.daily_returns)}")
+        st.write(f"- Date range: {result.daily_returns.index.min()} to {result.daily_returns.index.max()}")
+        st.write(f"- Days with non-zero returns: {(result.daily_returns.abs() > 1e-10).sum()}")
+        st.write(f"- Days with NaN returns: {result.daily_returns.isna().sum()}")
+        st.write(f"- Days with zero returns: {(result.daily_returns.abs() <= 1e-10).sum()}")
+        st.write(f"- Mean daily return: {result.daily_returns.mean():.6f}")
+        st.write(f"- Std daily return: {result.daily_returns.std():.6f}")
+        
+        with st.expander("📋 First 20 Daily Returns", expanded=False):
+            first_returns = pd.DataFrame({
+                'Date': result.daily_returns.index[:20].strftime('%Y-%m-%d'),
+                'Return': (result.daily_returns.iloc[:20] * 100).round(4)
+            })
+            st.dataframe(first_returns, use_container_width=True)
+        
+        with st.expander("📋 Last 20 Daily Returns", expanded=False):
+            last_returns = pd.DataFrame({
+                'Date': result.daily_returns.index[-20:].strftime('%Y-%m-%d'),
+                'Return': (result.daily_returns.iloc[-20:] * 100).round(4)
+            })
+            st.dataframe(last_returns, use_container_width=True)
+        
         metrics = compute_performance_metrics(result.daily_returns)
         
         col1, col2, col3, col4 = st.columns(4)
@@ -588,11 +612,28 @@ if uploaded_file is not None:
         
         with tab4:
             try:
-                quarterly_returns = result.daily_returns.resample('QE').apply(
-                    lambda x: (1 + x).prod() - 1
-                )
+                # Calculate quarterly returns with NaN handling
+                returns_filled = result.daily_returns.fillna(0.0)
+                quarterly_returns = (1 + returns_filled).resample('QE').prod() - 1
+                
+                # Debug: Show quarterly stats
+                st.write("**Quarterly Returns Breakdown:**")
+                st.write(f"- Total quarters: {len(quarterly_returns)}")
+                st.write(f"- Positive quarters: {(quarterly_returns > 0).sum()}")
+                st.write(f"- Negative quarters: {(quarterly_returns < 0).sum()}")
+                st.write(f"- Best quarter: {quarterly_returns.max():.2%}")
+                st.write(f"- Worst quarter: {quarterly_returns.min():.2%}")
+                
                 fig = plot_quarterly_hit_ratio(quarterly_returns)
                 st.plotly_chart(fig, use_container_width=True)
+                
+                # Show quarterly returns table
+                with st.expander("📊 View All Quarterly Returns", expanded=False):
+                    quarterly_df = pd.DataFrame({
+                        'Quarter End': quarterly_returns.index.strftime('%Y-%m-%d'),
+                        'Return (%)': (quarterly_returns * 100).round(2)
+                    })
+                    st.dataframe(quarterly_df, use_container_width=True)
             except Exception as e:
                 st.error(f"Error plotting quarterly returns: {str(e)}")
         

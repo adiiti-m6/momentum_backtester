@@ -209,11 +209,13 @@ class BacktestEngine:
                     available_prices
                 )
                 
-                # Execute trades and update positions
+                # Execute trades and update equity
                 for trade in trades:
-                    current_positions[trade.ticker] = target_shares.get(trade.ticker, 0.0)
                     current_equity -= trade.transaction_cost
                     trades_list.append(trade)
+                
+                # Update positions to target (after all trades executed)
+                current_positions = target_shares.copy()
                 
                 # Compute turnover
                 gross_value_traded = sum(t.gross_cost for t in trades)
