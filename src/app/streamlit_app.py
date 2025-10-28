@@ -103,7 +103,7 @@ with st.sidebar:
         value=24,
         min_value=1,
         max_value=universe_size,
-        help="Number of top tickers to buy each quarter"
+        help="Number of top tickers to buy each quarter (equal capital allocation)"
     )
     
     exit_rank_threshold = st.number_input(
@@ -376,8 +376,14 @@ def run_backtest(df_long, config, initial_capital):
         # Get quarter-end dates
         qe_days = quarter_end_days(prices.index)
         
+        # Filter to start from June 2016 onwards (exclude Dec 2015, Mar 2016)
+        qe_days = qe_days[qe_days >= pd.Timestamp('2016-06-30')]
+        
+        st.write(f"**Rebalance dates:** Starting from {qe_days[0].date() if len(qe_days) > 0 else 'N/A'}")
+        st.write(f"**Total rebalance dates:** {len(qe_days)}")
+        
         if len(qe_days) < 1:
-            raise ValueError("Insufficient data for at least 1 quarter-end rebalance")
+            raise ValueError("Insufficient data for at least 1 quarter-end rebalance after June 2016")
         
         # Momentum strategy with ranking
         def strategy_callable(date, current_positions, current_equity):
@@ -456,10 +462,24 @@ def run_backtest(df_long, config, initial_capital):
                 entry_tickers = set([ticker for ticker, ret in sorted_by_return[:config.entry_count]])
                 entry_tickers = entry_tickers.intersection(universe)  # Ensure available
                 
-                # Equal weight on selected tickers
+                # Equal CAPITAL allocation (not equal weight)
+                # Divide total equity equally among selected tickers
                 if len(entry_tickers) > 0:
-                    weight = 1.0 / len(entry_tickers)
-                    target_weights = {ticker: weight for ticker in entry_tickers}
+                    capital_per_ticker = current_equity / len(entry_tickers)
+                    
+                    # Calculate weights based on equal capital allocation
+                    target_weights = {}
+                    for ticker in entry_tickers:
+                        ticker_price = available_prices[ticker]
+                        if ticker_price > 0:
+                            # Weight = (Capital allocated to ticker) / (Total equity)
+                            # This ensures each ticker gets equal dollar amount
+                            target_weights[ticker] = capital_per_ticker / current_equity
+                    
+                    # Normalize weights to sum to 1.0
+                    total_weight = sum(target_weights.values())
+                    if total_weight > 0:
+                        target_weights = {t: w / total_weight for t, w in target_weights.items()}
                 else:
                     target_weights = {}
                 
@@ -602,6 +622,8 @@ if uploaded_file is not None:
             for i, (key, value) in enumerate(config_dict.items()):
                 with cols[i % 2]:
                     st.metric(label=key.replace("_", " ").title(), value=value)
+            
+            st.info("📌 **Strategy Notes:**\n- Rebalancing starts from **June 2016** (excludes Dec 2015 quarter)\n- **Equal capital allocation**: Each selected ticker receives equal dollar amount")
         
         # Key metrics
         st.subheader("📈 Key Performance Metrics")
